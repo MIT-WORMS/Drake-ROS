@@ -1,3 +1,0 @@
-builtin_interfaces/Time stamp
-ros2_example_common_msgs/Status status
-string origin
