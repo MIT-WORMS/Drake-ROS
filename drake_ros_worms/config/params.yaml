@@ -1,1 +1,2 @@
-scene_file_path: "/mnt/shared/repos/WORMS/WORMS-assets/URDFs/3DOF-WORM-welded.urdf"
+scene_file_path: "/mnt/shared/repos/WORMS/WORMS-assets/URDFs/pony-worm.urdf"
+simulator_frequency: 10.0
