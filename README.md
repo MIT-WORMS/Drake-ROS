@@ -2,9 +2,50 @@
 
 [![drake-ros continuous integration](https://github.com/RobotLocomotion/drake-ros/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/RobotLocomotion/drake-ros/actions/workflows/main.yml?query=branch%3Amain)
 
+## WORMS Setup
+
+Install Drake globally to your system
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends \
+    ca-certificates gnupg lsb-release wget
+wget -qO- https://drake-apt.csail.mit.edu/drake.asc | gpg --dearmor - \
+    | sudo tee /etc/apt/trusted.gpg.d/drake.gpg >/dev/null
+echo "deb [arch=amd64] https://drake-apt.csail.mit.edu/$(lsb_release -cs) $(lsb_release -cs) main" \
+    | sudo tee /etc/apt/sources.list.d/drake.list >/dev/null
+sudo apt-get update
+sudo apt-get install --no-install-recommends drake-dev
+```
+
+Add the following lines to `~/.bash_aliases`
+
+```bash
+export PATH="/opt/drake/bin${PATH:+:${PATH}}"
+export PYTHONPATH="/opt/drake/lib/python$(python3 -c 'import sys; print("{0}.{1}".format(*sys.version_info))')/site-packages${PYTHONPATH:+:${PYTHONPATH}}"
+```
+
+Navigate to the `src` directory and run the following commands to install this code
+
+```bash
+git clone https://github.com/MIT-WORMS/Drake-ROS.git
+```
+
+You can then build and source like normal. You can configure the simulation with the [`params.yaml`](/drake_ros_worms/config/params.yaml) file. To launch the WORMS Drake interface, use the following command
+
+```bash
+ros2 launch drake_ros_worms drake_launch.py
+```
+
+To reset the simulation at any time, enter the following command in a separate terminal. You will also have to press the `Reset` button in the bottom left of rviz to update the viewer.
+
+```bash
+ros2 service call /reset_simulation std_srvs/srv/Empty
+```
+
 ## Getting Started
 
-See [`drake_ros_examples`](./drake_ros_examples) for an example of
+See [`drake_ros_examples`](./_drake_ros_examples) for an example of
 getting started with both Drake and ROS 2 using `colcon`.
 
 If you are using Bazel to build , please see
