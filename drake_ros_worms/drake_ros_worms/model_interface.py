@@ -24,6 +24,8 @@ import rclpy
 import rclpy.logging
 from rclpy.impl.rcutils_logger import RcutilsLogger
 from rclpy.qos import QoSProfile
+from rclpy.node import Node
+from std_srvs.srv import Empty
 from sensor_msgs.msg import JointState
 
 # Extra imports
@@ -31,6 +33,100 @@ from collections import defaultdict
 import argparse
 import re
 import numpy as np
+
+class DrakeSimNode(Node):
+    """
+    A node dedicated to progressing and resetting the Drake simulation. Sending a
+    `/reset_simulation` empty service will reset the simulation to its initial state.
+    """
+
+    def __init__(
+            self,
+            sim_period: float,
+            simulator: Simulator | None = None
+        ) -> None:
+        """
+        Initializes the util node and stores the simulator reference for resetting later. If the
+        simulator is not passed at initialization, it must be set at a later time with a call 
+        to `store_simulator`.
+
+        Args:
+            sim_period (float): The timestep to advance the simulator by
+            simulator (Simulator): The simulator reference to reset the context on
+        """
+        super().__init__('drake_util_node')
+        self._logger = self.get_logger()
+        self._sim_period = sim_period
+
+        # Simulator setup if it was passed during initialization
+        self._simulator = None
+        self._sim_context = None
+        self.store_simulator(simulator)
+
+        # Simulator timer callback
+        self.timer = self.create_timer(self._sim_period, self.sim_callback)
+        
+        # Create the reset service
+        self.srv = self.create_service(Empty, 'reset_simulation', self.reset_callback)
+
+    @property
+    def logger(self) -> RcutilsLogger:
+        return self._logger
+
+    def store_simulator(
+            self,
+            simulator: Simulator
+        ) -> None:
+        """
+        Stores the simulator referece if it was not set during initialization.
+
+        Args:
+            simulator (Simulator): The simulator reference to reset the context on
+        """
+        if simulator:
+            assert isinstance(simulator, Simulator)
+            self.logger.info("Starting Drake simulation...")
+            self._simulator = simulator
+            simulator.Initialize()
+            simulator.set_target_realtime_rate(1.0)
+            self._sim_context = simulator.get_mutable_context()
+
+    def sim_callback(self) -> None:
+        """Progresses the simulation by a fixed timestep."""
+        if self._simulator:
+            next_time = self._sim_context.get_time() + self._sim_period
+            self._simulator.AdvanceTo(next_time)
+
+    def reset_callback(
+            self, 
+            request: Empty.Request, 
+            response: Empty.Response
+        ) -> Empty.Response:
+        """
+        Callback function for resetting the Drake simulation.
+        
+        Args:
+            request (Empty.Request): The empty request for this service call
+            response (Empty.Response): The empty response for this service
+        """
+
+        if self._simulator:
+            # Reset the simulation
+            self.logger.info("Resetting the simulation...")
+            context = self._simulator.get_mutable_context()
+            context.SetTime(0)
+            self._simulator.Initialize()
+            self._simulator.get_system().SetDefaultContext(context)
+            self._sim_context = context
+
+        else:
+            # Log an error, node was not fully initialized yet
+            self.logger.error(
+                "`/reset_simulation` was called before the simulator "
+                "was initialized in the Drake util node."
+            )
+
+        return response
 
 class DrakeInterface(LeafSystem):
     """
@@ -48,15 +144,18 @@ class DrakeInterface(LeafSystem):
 
     def __init__(
             self,
-            plant: MultibodyPlant
+            plant: MultibodyPlant,
+            util_node: Node
         ) -> None:
         """
         Responsible for initializing the interface system and setting up all inputs and outputs.
 
         Args:
             plant (MultibodyPlant): The plant to set up the ROS interface for
+            util_node (Node): A utility node, used to get ROS time for publishing messages
         """
         super().__init__()
+        self.util_node = util_node
 
         # Set up the actuation map -> {'namespace': (input_port, actuator_indices)}
         self.actuation_map = None
@@ -115,9 +214,8 @@ class DrakeInterface(LeafSystem):
         joint_positions = self.state_input.Eval(context)[joint_indices]
 
         # Create the ROS message
-        # NOTE (trejohst): We are not setting header fields, this would require
-        # something like storing a node in the DrakeInterface to accomplish
         msg = JointState()
+        msg.header.stamp = self.util_node.get_clock().now().to_msg()
         msg.position = joint_positions.tolist()
         
         # Set the output
@@ -305,7 +403,6 @@ def parse_args() -> tuple[str, float]:
 
 
 def main():
-    logger = rclpy.logging.get_logger('drake_interface')
     model_path, sim_period = parse_args()
 
     # Initialize drake_ros and add our node
@@ -313,6 +410,10 @@ def main():
     builder = DiagramBuilder()
     ros_interface_system = builder.AddSystem(RosInterfaceSystem('drake_node'))
     ClockSystem.AddToBuilder(builder, ros_interface_system.get_ros_interface())
+
+    # Create the util node for resetting the simulation, we will pass the sim reference later
+    rclpy.init()
+    sim_node = DrakeSimNode(sim_period)
 
     # Add the MultibodyPlant and SceneGraph
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=sim_period)
@@ -347,7 +448,7 @@ def main():
     builder.Connect(scene_graph.GetOutputPort('query'), rviz_visualizer.get_graph_query_input_port())
 
     # Add our ROS interface system and wire the unique ports
-    interface = builder.AddSystem(DrakeInterface(plant))
+    interface = builder.AddSystem(DrakeInterface(plant, sim_node))
     builder.Connect(plant.get_state_output_port(), interface.GetInputPort('state'))
     builder.Connect(interface.GetOutputPort('actuation'), plant.get_actuation_input_port())
 
@@ -385,20 +486,18 @@ def main():
         state_topics.append(state_topic)
 
     # Log topics for debug
-    log_debug_topics(logger, actuation_topics, state_topics)
+    log_debug_topics(sim_node.logger, actuation_topics, state_topics)
 
     # Set up simulator
     diagram = builder.Build()
     simulator = Simulator(diagram)
-    simulator.Initialize()
-    simulator.set_target_realtime_rate(1.0)
-    sim_context = simulator.get_mutable_context()
+    sim_node.store_simulator(simulator)
+    rclpy.spin(sim_node)
 
-    # Advance simulator until termination
-    logger.info("Starting Drake simulation...")
-    while True:
-        next_time = sim_context.get_time() + sim_period
-        simulator.AdvanceTo(next_time)
+    # Cleanup when exiting
+    sim_node.logger.info("Stopping Drake simulation...")
+    sim_node.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
