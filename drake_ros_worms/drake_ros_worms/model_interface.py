@@ -8,8 +8,15 @@ from drake_ros.viz import RvizVisualizer
 # Pydrake imports
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder, LeafSystem, Context, BasicVector
+from pydrake.math import RigidTransform
+from pydrake.geometry import HalfSpace
 from pydrake.multibody.parsing import Parser
-from pydrake.multibody.plant import MultibodyPlant, AddMultibodyPlantSceneGraph
+from pydrake.multibody.plant import (
+    MultibodyPlant, 
+    CoulombFriction, 
+    DiscreteContactApproximation, 
+    AddMultibodyPlantSceneGraph
+)
 from pydrake.common.value import AbstractValue
 
 # ROS imports
@@ -287,14 +294,14 @@ def parse_args() -> tuple[str, float]:
         required=True
     )
     parser.add_argument(
-        "--sim-frequency",
-        help="Target frequency of the simulator, in Hz.",
+        "--simulator-step",
+        help="Simulator timestep.",
         type=float,
-        default=10.0
+        default=0.01
     )
     args = parser.parse_known_args()[0]
 
-    return args.scene_file_path, 1.0 / args.sim_frequency
+    return args.scene_file_path, args.simulator_step
 
 
 def main():
@@ -309,10 +316,28 @@ def main():
 
     # Add the MultibodyPlant and SceneGraph
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=sim_period)
+    plant.set_discrete_contact_approximation(DiscreteContactApproximation.kSap)
 
     # Add the model to the scene
     parser = Parser(plant)
     parser.AddModels(model_path)
+
+    # Add a ground plane to the scene
+    # NOTE (trejohst): We can uncomment this to see the ground if we wish
+    # plant.RegisterVisualGeometry(
+    #     plant.world_body(), 
+    #     RigidTransform(), 
+    #     HalfSpace(), 
+    #     "GroundVisual", 
+    #     np.array([1, 1, 1, 1])
+    # )
+    plant.RegisterCollisionGeometry(
+        plant.world_body(), 
+        RigidTransform(), 
+        HalfSpace(), 
+        "GroundCollision",
+        CoulombFriction(1.0, 1.0)
+    )
     plant.Finalize()
 
     # Visualization

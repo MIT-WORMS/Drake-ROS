@@ -13,7 +13,7 @@ def generate_launch_description():
         if "scene_file_path" not in params: 
             raise RuntimeError("Must set scene_file_path in params.yaml")
         scene_file_path = params["scene_file_path"]
-        simulator_frequency = str(params.get("simulator_frequency"))
+        simulator_step = str(params.get("simulator_timestep"))
 
     return LaunchDescription([
         Node(
@@ -31,7 +31,7 @@ def generate_launch_description():
             name='drake',
             arguments=[
                 "--scene-file-path", scene_file_path,
-                "--simulator-frequency", simulator_frequency
+                "--simulator-step", simulator_step
             ]
         )
     ])

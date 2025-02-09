@@ -1,2 +1,8 @@
-scene_file_path: "/mnt/shared/repos/WORMS/WORMS-assets/URDFs/pony-worm.urdf"
-simulator_frequency: 10.0
+# Path to a urdf to load into the world
+scene_file_path: "/mnt/shared/repos/WORMS/WORMS-assets/URDFs/turtle.urdf"
+
+# Target timestep of the simulator
+# higher values can lead to instability in the simulation
+# lower values will give better results, but may start to run at less than realtime rate
+# (i.e. one second in sim > one second in real life)
+simulator_timestep: 0.005
