@@ -209,14 +209,17 @@ class DrakeInterface(LeafSystem):
             ns (str): Namespace of the joints this output corresponds to
         """
         
-        # Get the joint positions for this namespace
+        # Get the joint configuration for this namespace
         output_port, joint_indices = self.state_map[ns]
-        joint_positions = self.state_input.Eval(context)[joint_indices]
+        state = self.state_input.Eval(context)
+        q = state[joint_indices]
+        qdot = state[joint_indices + len(state) // 2]
 
         # Create the ROS message
         msg = JointState()
         msg.header.stamp = self.util_node.get_clock().now().to_msg()
-        msg.position = joint_positions.tolist()
+        msg.position = q.tolist()
+        msg.velocity = qdot.tolist()
         
         # Set the output
         data.set_value(msg)
@@ -289,7 +292,7 @@ class DrakeInterface(LeafSystem):
                     f'/{namespace}/actuation_cmd', 
                     AbstractValue.Make(JointState())
                 ),
-                actuator_indices
+                np.array(actuator_indices)
             )
 
         # Establish the combined output port for all ROS actuation messages
@@ -343,7 +346,7 @@ class DrakeInterface(LeafSystem):
                     lambda: AbstractValue.Make(JointState()),
                     lambda context, data, ns=namespace : self.calc_state_output(context, data, ns)
                 ),
-                joint_indices
+                np.array(joint_indices)
             )
 
         # Establish the combined input port for all Drake state messages
